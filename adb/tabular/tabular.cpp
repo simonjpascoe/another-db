@@ -69,12 +69,12 @@ void Tabular::basicPrint() const
     }
 }
 
-const Entry& Table0::getValue(std::size_t row, std::size_t column) const
+const Entry Table0::getValue(std::size_t row, std::size_t column) const
 {
     return m_columns[column][row];
 }
 
-const Entry& Table::getValue(std::size_t row, std::size_t column) const
+const Entry Table::getValue(std::size_t row, std::size_t column) const
 {
     return m_underlyings[0]->getValue(row, column);
 }
@@ -84,7 +84,7 @@ const PT Tabular::project(const CS columns) const
     return std::make_shared<Project>(shared_from_this(), columns);
 }
 
-const Entry& Project::getValue(std::size_t row, std::size_t column) const
+const Entry Project::getValue(std::size_t row, std::size_t column) const
 {
     return m_underlyings[0]->getValue(row, m_colmap.at(column));
 }
@@ -109,7 +109,7 @@ const std::size_t Concat::nRows() const
         return m_underlyings[0]->nRows() + m_underlyings[1]->nRows();
 }
 
-const Entry& Concat::getValue(std::size_t row, std::size_t column) const
+const Entry Concat::getValue(std::size_t row, std::size_t column) const
 {
     auto sz = m_underlyings[0]->nRows();
     auto sy = m_underlyings[0]->nCols();
@@ -136,7 +136,7 @@ const PT Tabular::join(const PT other, const CS keys1, const CS keys2) const
     return std::make_shared<Join>(shared_from_this(), other, keys1, keys2);
 }
 
-const Entry& Join::getValue(std::size_t row, std::size_t column) const
+const Entry Join::getValue(std::size_t row, std::size_t column) const
 {
     auto p = m_rowindex[row];
     auto sy = m_underlyings[0]->nCols();
@@ -152,13 +152,43 @@ const Entry& Join::getValue(std::size_t row, std::size_t column) const
     }
 }
 
+const PT Tabular::groupBy(const CS keys, const AS aggrs) const
+{
+    return std::make_shared<GroupBy>(shared_from_this(), keys, aggrs);
+}
+
+const Entry GroupBy::getValue(std::size_t row, std::size_t column) const
+{
+    auto it = m_index.groups().begin();
+    std::advance(it, row);
+    if (column < m_keys.size()) {
+        return it->first[column];
+    }
+    else
+    {
+        // calculate the source column
+        std::size_t offset = column - m_keys.size();
+        std::size_t source = m_underlyings[0]->getSchema().indexOf(std::get<1>(m_aggrs[offset]));
+
+        switch (std::get<0>(m_aggrs[offset]))
+        {
+            case Aggr::uSum:
+                return std::accumulate(it->second.begin(), it->second.end(), 0.0,
+                    [this, source](double s, std::size_t j) -> double {return s + std::get<double>(*m_underlyings[0]->getValue(j, source)); });
+            case Aggr::uFirst:
+                return m_underlyings[0]->getValue(*(it->second.begin()), source);
+            case Aggr::uLast:
+                return m_underlyings[0]->getValue(*(it->second.end()-1), source);
+        }
+    }
+}
 
 const PT Tabular::filter(const CS columns, const ES values) const
 {
     return std::make_shared<Filter1>(shared_from_this(), columns, values);
 }
 
-const Entry& Filter1::getValue(std::size_t row, std::size_t column) const
+const Entry Filter1::getValue(std::size_t row, std::size_t column) const
 {
     return m_underlyings[0]->getValue(m_rowdex[row], column);
 }

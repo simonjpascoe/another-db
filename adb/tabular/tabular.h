@@ -14,6 +14,12 @@ typedef std::optional<Entry0> Entry;
 typedef std::shared_ptr<const Tabular> PT;
 typedef std::vector<Entry> ES;
 
+// aggregations temporary
+//const double sum(std::vector<double> input)
+//{
+//    return std::accumulate(input.begin(), input.end(), 0.0);
+//}
+
 class CategoricalStore
 {
 private:
@@ -41,7 +47,7 @@ public:
         }
     }
 
-    const Entry& operator[](int value)
+    const Entry operator[](int value)
     {
         return m_ba[value];
     }
@@ -101,7 +107,7 @@ public:
         return m_entries.size();
     }
 
-    const Entry& operator[](std::size_t n) const
+    const Entry operator[](std::size_t n) const
     {
         if (m_dt == DataType::SHORT_TEXT)
             return m_cstore->operator[](std::get<int>(*m_entries[n]));
@@ -122,7 +128,7 @@ public:
     virtual const std::size_t nRows() const = 0;
     //virtual const Column& operator[](std::size_t column) const = 0;
 
-    virtual const Entry& getValue(std::size_t row, std::size_t column) const = 0;
+    virtual const Entry getValue(std::size_t row, std::size_t column) const = 0;
 
     const std::size_t nCols() const
     {
@@ -135,6 +141,7 @@ public:
     const PT rename(const CS original, const CS renamed) const;
     const PT concat(const PT other, bool horizontal) const;
     const PT join(const PT other, const CS keys1, const CS keys2) const;
+    const PT groupBy(const CS keys, const AS aggrs) const;
     const PT filter(const CS columns, const ES values) const;
 };
 
@@ -146,13 +153,13 @@ private:
     std::map<std::vector<Entry>, std::vector<std::size_t>> m_groups;
 
 public:
-    Index(const PT& source, const CS columns) :
+    Index(const PT& source, const CS& columns) :
         m_columns(columns)
     {
         for (std::size_t i = 0; i < source->nRows(); ++i)
         {
-            std::vector<Entry> key;
-            for (auto c : columns)
+            ES key;
+            for (const std::string& c : columns)
                 key.push_back(source->getValue(i, source->getSchema().indexOf(c)));
 
             auto existing = m_groups.find(key);
@@ -167,7 +174,7 @@ public:
         }
     }
 
-    const std::map<std::vector<Entry>, std::vector<std::size_t>> groups() const
+    const std::map<ES, std::vector<std::size_t>>& groups() const
     {
         return m_groups;
     }
@@ -182,10 +189,10 @@ class Table0 : public Tabular
 private:
     const CategoricalStore m_cstore;
     const std::vector<ColumnShard> m_columns;
-    const Schema& m_schema;
+    const Schema m_schema;
 
 public:
-    Table0(const Schema& schema, const std::vector<ColumnShard> columns):
+    Table0(const Schema& schema, const std::vector<ColumnShard>& columns):
         m_schema(schema), m_columns(columns)
     {}
 
@@ -199,7 +206,7 @@ public:
         return m_columns[0].nRows();
     }
 
-    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry getValue(std::size_t row, std::size_t column) const;
 };
 
 class Table : public Tabular
@@ -209,7 +216,7 @@ protected:
     const Schema m_schema;
 
 public:
-    Table(const std::vector<PT> underlyings, const Schema& schema) :
+    Table(const std::vector<PT>& underlyings, const Schema& schema) :
         m_underlyings(underlyings), m_schema(schema)
     {
 
@@ -225,7 +232,7 @@ public:
         return m_schema;
     }
 
-    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry getValue(std::size_t row, std::size_t column) const;
 };
 
 class Project : public Table
@@ -234,7 +241,7 @@ private:
     std::map<std::size_t, std::size_t> m_colmap;
 
 public:
-    Project(const PT underlying, CS columns):
+    Project(const PT underlying, const CS& columns):
         Table({ underlying }, underlying->getSchema().project(columns))
     {
         auto schema0 = underlying->getSchema();
@@ -245,7 +252,7 @@ public:
         }
     }
 
-    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry getValue(std::size_t row, std::size_t column) const;
 };
 
 class Rename : public Table
@@ -278,14 +285,14 @@ public:
     }
 
     virtual const std::size_t nRows() const;
-    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry getValue(std::size_t row, std::size_t column) const;
 };
 
 class Join : public Table
 {
 private:
-    const CS& m_keys1;
-    const CS& m_keys2;
+    const CS m_keys1;
+    const CS m_keys2;
 
     std::vector<std::pair<std::size_t, std::size_t>> m_rowindex;
     std::map<std::size_t, std::size_t> m_other_colindex;
@@ -335,14 +342,39 @@ public:
         return m_rowindex.size();
     }
 
-    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry getValue(std::size_t row, std::size_t column) const;
+};
+
+class GroupBy : public Table
+{
+private:
+    const CS m_keys;
+    const AS m_aggrs;
+    const Index m_index;
+
+public:
+    GroupBy(const PT underlying,
+        const CS& keys,
+        const AS& aggrs):
+        Table({ underlying }, underlying->getSchema().groupBy(keys, aggrs)),
+        m_keys(keys), m_aggrs(aggrs), m_index(Index(underlying, keys))
+    {
+
+    }
+
+    virtual const std::size_t nRows() const
+    {
+        return m_index.groups().size();
+    }
+
+    virtual const Entry getValue(std::size_t row, std::size_t column) const;
 };
 
 class Filter1 : public Table
 {
 private:
-    const CS& m_columns;
-    const ES& m_values;
+    const CS m_columns;
+    const ES m_values;
     std::vector<std::size_t> m_rowdex;
 
 public:
@@ -379,5 +411,5 @@ public:
         return m_rowdex.size();
     }
 
-    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry getValue(std::size_t row, std::size_t column) const;
 };

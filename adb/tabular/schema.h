@@ -71,4 +71,5 @@ public:
     const Schema rename(const CS& original, const CS& renamed) const;
     const Schema hconcat(const Schema& other) const;
     const Schema join(const Schema& other, const CS& keys1, const CS& keys2) const;
+    const Schema groupBy(const CS& keys, const AS& aggrs) const;
 };
