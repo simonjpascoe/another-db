@@ -34,7 +34,7 @@ int main()
 
     std::vector<int> A{ 4,1,3,3 };
     std::vector<std::string> C {"four", "one", "six", "six" };
-    std::vector<double> D{ 0.22, 0.34, 1.23, 3.33};
+    std::vector<std::optional<double>> D{ 0.22, 3.22, 1.23, nullopt};
     std::vector<std::string> E{ "alpha", "beta", "delta", "gamma" };
 
     auto col_a = ColumnShard(a);
@@ -60,8 +60,7 @@ int main()
 
     auto k = w->groupBy({ "a" }, { std::make_tuple(Aggr::uSum, "D", std::nullopt),
                                    std::make_tuple(Aggr::uFirst, "D", std::nullopt),
-                                   std::make_tuple(Aggr::uLast, "E", std::nullopt) });
+                                   std::make_tuple(Aggr::uLast, "E", std::nullopt) }); // ->project({ "a", "last_E" });
     k->basicPrint();
-
     return 0;
 }

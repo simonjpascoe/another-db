@@ -9,8 +9,7 @@
 
 class Tabular; 
 
-typedef std::variant<int, std::string, double> Entry0;
-typedef std::optional<Entry0> Entry;
+typedef std::variant<std::monostate, int, std::string, double> Entry;
 typedef std::shared_ptr<const Tabular> PT;
 typedef std::vector<Entry> ES;
 
@@ -25,7 +24,7 @@ class CategoricalStore
 private:
     int next_index = 0;
     std::map<std::string, int> m_ab;
-    std::map<int, Entry0> m_ba;
+    std::map<int, Entry> m_ba;
 
 public:
     CategoricalStore()
@@ -42,12 +41,12 @@ public:
         {
             auto k = next_index++;
             m_ab[value] = k;
-            m_ba[k] = Entry0(value);
+            m_ba[k] = Entry(value);
             return k;
         }
     }
 
-    const Entry operator[](int value)
+    const Entry& operator[](int value)
     {
         return m_ba[value];
     }
@@ -78,13 +77,19 @@ public:
     ColumnShard(const std::vector<std::optional<int>> ints) : m_dt(DataType::INT)
     {
         std::transform(ints.begin(), ints.end(), std::back_inserter(m_entries),
-            [](std::optional<int> i) -> Entry { return Entry(i); });
+            [](std::optional<int> i) -> Entry { return i.has_value() ? Entry(*i) : Entry(std::monostate()); });
     }
 
     ColumnShard(const std::vector<double> doubles) : m_dt(DataType::DOUBLE)
     {
         std::transform(doubles.begin(), doubles.end(), std::back_inserter(m_entries),
             [](double d) -> Entry { return Entry(d); });
+    }
+    
+    ColumnShard(const std::vector<std::optional<double>> doubles) : m_dt(DataType::DOUBLE)
+    {
+        std::transform(doubles.begin(), doubles.end(), std::back_inserter(m_entries),
+            [](std::optional<double> i) -> Entry { return i.has_value() ? Entry(*i) : Entry(); });
     }
 
     ColumnShard(const std::vector<std::string> strings) : m_dt(DataType::TEXT)
@@ -107,10 +112,10 @@ public:
         return m_entries.size();
     }
 
-    const Entry operator[](std::size_t n) const
+    const Entry& operator[](std::size_t n) const
     {
         if (m_dt == DataType::SHORT_TEXT)
-            return m_cstore->operator[](std::get<int>(*m_entries[n]));
+            return m_cstore->operator[](std::get<int>(m_entries[n]));
         else
             return m_entries[n];
     }
@@ -128,7 +133,7 @@ public:
     virtual const std::size_t nRows() const = 0;
     //virtual const Column& operator[](std::size_t column) const = 0;
 
-    virtual const Entry getValue(std::size_t row, std::size_t column) const = 0;
+    virtual const Entry& getValue(std::size_t row, std::size_t column) const = 0;
 
     const std::size_t nCols() const
     {
@@ -206,7 +211,7 @@ public:
         return m_columns[0].nRows();
     }
 
-    virtual const Entry getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
 };
 
 class Table : public Tabular
@@ -232,7 +237,7 @@ public:
         return m_schema;
     }
 
-    virtual const Entry getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
 };
 
 class Project : public Table
@@ -252,7 +257,7 @@ public:
         }
     }
 
-    virtual const Entry getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
 };
 
 class Rename : public Table
@@ -285,7 +290,7 @@ public:
     }
 
     virtual const std::size_t nRows() const;
-    virtual const Entry getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
 };
 
 class Join : public Table
@@ -342,7 +347,7 @@ public:
         return m_rowindex.size();
     }
 
-    virtual const Entry getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
 };
 
 class GroupBy : public Table
@@ -352,10 +357,13 @@ private:
     const AS m_aggrs;
     const Index m_index;
 
+    // performance cache, beware mutable
+    mutable std::vector<std::vector<std::optional<Entry>> > m_cache;
+ 
 public:
     GroupBy(const PT underlying,
         const CS& keys,
-        const AS& aggrs):
+        const AS& aggrs) :
         Table({ underlying }, underlying->getSchema().groupBy(keys, aggrs)),
         m_keys(keys), m_aggrs(aggrs), m_index(Index(underlying, keys))
     {
@@ -367,7 +375,7 @@ public:
         return m_index.groups().size();
     }
 
-    virtual const Entry getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
 };
 
 class Filter1 : public Table
@@ -411,5 +419,5 @@ public:
         return m_rowdex.size();
     }
 
-    virtual const Entry getValue(std::size_t row, std::size_t column) const;
+    virtual const Entry& getValue(std::size_t row, std::size_t column) const;
 };
